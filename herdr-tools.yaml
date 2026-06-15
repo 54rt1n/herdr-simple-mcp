@@ -1,19 +1,13 @@
 # herdr-simple-mcp tool contract — the single source of truth.
 #
-# Each entry is a herdr socket method. The server builds one MCP tool per method
-# (name = method with "." -> "_"), with an input schema generated from `params`.
+# DERIVED FROM herdr's own source: src/api/schema/*.rs at v0.7.0 (the `*Params` structs).
+# A field is required unless the struct marks it `#[serde(default)]` or `Option<…>`.
+# Enums are encoded with `enum:`; structured (tagged) fields are `type: object/array`
+# with the shape in `desc`. herdr ignores unknown fields, so methods with optional
+# fields beyond what's listed are marked `passthrough: true` (we never reject a valid call).
 #
-# Per method:
-#   group:        capability group (drives profiles; see README)
-#   description:  shown to the model
-#   danger:       advisory flag for destructive/disruptive methods
-#   passthrough:  accept an arbitrary params object (no strict field contract) — used
-#                 for methods whose param shapes are not yet verified against the daemon
-#   params:       { <name>: { type, required, desc, enum } }  -> a strict JSON Schema
-#                 (additionalProperties:false, so typos are rejected)
-#
-# Verified against a live herdr daemon. To regenerate the method list, send any unknown
-# method to the socket; the error lists every valid method. Then update this file only.
+# One MCP tool per method (name = method with "." -> "_"). To regenerate, re-read the
+# schema structs — do not trust the website docs (they were badly out of sync at 0.7.0).
 
 herdr_version: "0.7.0"
 
@@ -22,6 +16,7 @@ methods:
   ping:
     group: observe
     description: Health check — returns herdr's pong, version, and capabilities.
+    passthrough: true
   server.agent_manifests:
     group: observe
     description: List known agent manifests.
@@ -33,38 +28,56 @@ methods:
   server.reload_config:
     group: admin
     description: Reload herdr configuration from disk.
+    passthrough: true
   server.stop:
     group: admin
     danger: true
     description: Stop the herdr server (DESTRUCTIVE).
+    passthrough: true
   server.live_handoff:
     group: admin
     danger: true
     description: Hand off the running server to a new process (disruptive).
+    passthrough: true
+    params:
+      expected_protocol: { type: integer }
+      expected_version:  { type: string }
   notification.show:
     group: admin
     description: Show a desktop notification.
+    passthrough: true
     params:
-      title:    { type: string, required: true }
-      body:     { type: string }
-      position: { type: string }
-      sound:    { type: string }
+      title: { type: string, required: true }
+      body:  { type: string }
+      sound: { type: string, enum: [none, done, request] }
+  client.window_title.set:
+    group: admin
+    description: Set the terminal window title.
+    params:
+      title: { type: string, required: true }
+  client.window_title.clear:
+    group: admin
+    description: Clear the terminal window title.
+    passthrough: true
 
   # ── workspace ───────────────────────────────────────────────────────────
+  workspace.create:
+    group: structure
+    description: Create a workspace.
+    passthrough: true
+    params:
+      cwd:   { type: string }
+      label: { type: string }
+      focus: { type: boolean }
   workspace.list:
     group: observe
     description: List all workspaces in the session.
+    passthrough: true
   workspace.get:
     group: observe
     description: Get a workspace's details.
     params:
       workspace_id: { type: string, required: true }
-  workspace.create:
-    group: structure
-    description: Create a workspace.
-    params:
-      cwd:   { type: string, desc: "Working directory." }
-      label: { type: string }
   workspace.focus:
     group: structure
     description: Focus a workspace.
@@ -75,9 +88,10 @@ methods:
     description: Rename a workspace.
     params:
       workspace_id: { type: string, required: true }
-      label:        { type: string, required: true, desc: "New label." }
+      label:        { type: string, required: true }
   workspace.close:
     group: structure
+    danger: true
     description: Close a workspace.
     params:
       workspace_id: { type: string, required: true }
@@ -86,20 +100,26 @@ methods:
   worktree.list:
     group: observe
     description: List git worktrees for a workspace.
+    passthrough: true
     params:
       workspace_id: { type: string }
       cwd:          { type: string }
   worktree.create:
     group: structure
-    description: Create a git worktree for a branch.
+    description: Create a git worktree (provide branch and/or path; defaults to current repo).
+    passthrough: true
     params:
       workspace_id: { type: string }
       cwd:          { type: string }
-      branch:       { type: string, required: true }
+      branch:       { type: string }
+      base:         { type: string }
+      path:         { type: string }
+      label:        { type: string }
       focus:        { type: boolean }
   worktree.open:
     group: structure
     description: Open an existing git worktree by path or branch.
+    passthrough: true
     params:
       workspace_id: { type: string }
       cwd:          { type: string }
@@ -115,9 +135,19 @@ methods:
       force:        { type: boolean }
 
   # ── tab ─────────────────────────────────────────────────────────────────
+  tab.create:
+    group: structure
+    description: Create a tab (defaults to the focused workspace).
+    passthrough: true
+    params:
+      workspace_id: { type: string }
+      cwd:          { type: string }
+      label:        { type: string }
+      focus:        { type: boolean }
   tab.list:
     group: observe
     description: List tabs, optionally scoped to a workspace.
+    passthrough: true
     params:
       workspace_id: { type: string }
   tab.get:
@@ -125,12 +155,6 @@ methods:
     description: Get a tab's details.
     params:
       tab_id: { type: string, required: true }
-  tab.create:
-    group: structure
-    description: Create a tab (defaults to the focused workspace).
-    params:
-      workspace_id: { type: string }
-      label:        { type: string }
   tab.focus:
     group: structure
     description: Focus a tab.
@@ -141,22 +165,78 @@ methods:
     description: Rename a tab.
     params:
       tab_id: { type: string, required: true }
-      label:  { type: string, required: true, desc: "New label." }
+      label:  { type: string, required: true }
   tab.close:
     group: structure
+    danger: true
     description: Close a tab.
     params:
       tab_id: { type: string, required: true }
 
+  # ── agent ───────────────────────────────────────────────────────────────
+  agent.list:
+    group: observe
+    description: List detected agents.
+    passthrough: true
+  agent.get:
+    group: observe
+    description: Get an agent's details by target.
+    params:
+      target: { type: string, required: true, desc: "terminal_id, pane_id, or unambiguous agent name." }
+  agent.read:
+    group: observe
+    description: Read an agent's output by target.
+    passthrough: true
+    params:
+      target: { type: string, required: true }
+      source: { type: string, required: true, enum: [visible, recent, recent_unwrapped, detection] }
+      lines:  { type: integer }
+  agent.explain:
+    group: observe
+    description: Explain an agent's current state.
+    params:
+      target: { type: string, required: true }
+  agent.focus:
+    group: agents
+    description: Focus an agent by target.
+    params:
+      target: { type: string, required: true }
+  agent.send:
+    group: agents
+    description: "Send text to an agent's input field. Does not press Enter."
+    params:
+      target: { type: string, required: true }
+      text:   { type: string, required: true }
+  agent.rename:
+    group: agents
+    description: Rename an agent.
+    params:
+      target: { type: string, required: true }
+      name:   { type: string }
+  agent.start:
+    group: agents
+    description: Start an agent. `name` is the agent (e.g. claude, codex); `argv` are extra CLI args (use [] for none).
+    passthrough: true
+    params:
+      name:         { type: string, required: true, desc: "Agent to launch, e.g. claude or codex." }
+      argv:         { type: array,  required: true, desc: "Extra CLI args as a string array; [] for none." }
+      cwd:          { type: string }
+      workspace_id: { type: string }
+      tab_id:       { type: string }
+      split:        { type: string, enum: [right, down] }
+      focus:        { type: boolean }
+
   # ── pane ────────────────────────────────────────────────────────────────
   pane.list:
     group: observe
-    description: List panes, optionally scoped to a tab.
+    description: List panes, optionally scoped to a workspace.
+    passthrough: true
     params:
-      tab_id: { type: string }
+      workspace_id: { type: string }
   pane.current:
     group: observe
     description: Get the current/focused pane.
+    passthrough: true
   pane.get:
     group: observe
     description: Get a pane's details.
@@ -165,9 +245,10 @@ methods:
   pane.read:
     group: observe
     description: Read a pane's output.
+    passthrough: true
     params:
-      pane_id: { type: string, desc: "Defaults to the focused pane." }
-      source:  { type: string, required: true, desc: "e.g. recent, visible." }
+      pane_id: { type: string, required: true }
+      source:  { type: string, required: true, enum: [visible, recent, recent_unwrapped, detection] }
       lines:   { type: integer }
   pane.layout:
     group: observe
@@ -181,91 +262,113 @@ methods:
     group: observe
     description: Get a pane's neighbor in a direction.
     passthrough: true
+    params:
+      direction: { type: string, required: true, enum: [left, right, up, down] }
   pane.edges:
     group: observe
     description: Get a pane's edges.
     passthrough: true
   pane.split:
     group: panes
-    description: Split a pane; returns the new pane.
+    description: Split a pane; returns the new pane. Omit target_pane_id for the focused pane.
+    passthrough: true
     params:
-      pane_id:   { type: string, desc: "Defaults to the focused pane." }
-      direction: { type: string, required: true, enum: [right, down, left, up] }
-      ratio:     { type: number, desc: "Fraction for the new pane, 0-1." }
+      direction:      { type: string, required: true, enum: [right, down] }
+      target_pane_id: { type: string, desc: "Pane to split; defaults to focused." }
+      workspace_id:   { type: string }
+      ratio:          { type: number, desc: "Fraction for the new pane, 0-1." }
+      cwd:            { type: string }
+      focus:          { type: boolean }
   pane.swap:
     group: panes
     description: Swap two panes.
     passthrough: true
+    params:
+      direction: { type: string, enum: [left, right, up, down] }
   pane.move:
     group: panes
-    description: Move a pane.
+    description: Move a pane to another tab/workspace.
     passthrough: true
+    params:
+      pane_id:     { type: string, required: true }
+      destination: { type: object, required: true, desc: 'Tagged by "type": {"type":"tab","tab_id":…,"split":"right|down"} | {"type":"new_tab",…} | {"type":"new_workspace",…}' }
   pane.zoom:
     group: panes
     description: Zoom (maximize) a pane.
     passthrough: true
-  pane.resize:
-    group: panes
-    description: Resize a pane.
-    passthrough: true
+    params:
+      mode: { type: string, enum: [toggle, on, off] }
   pane.focus_direction:
     group: panes
-    description: Focus the pane in a direction.
+    description: Move focus to the pane in a direction.
     passthrough: true
+    params:
+      direction: { type: string, required: true, enum: [left, right, up, down] }
+  pane.resize:
+    group: panes
+    description: Resize a pane in a direction.
+    passthrough: true
+    params:
+      direction: { type: string, required: true, enum: [left, right, up, down] }
+      amount:    { type: number }
   pane.rename:
     group: panes
     description: Rename a pane.
     params:
-      pane_id: { type: string, desc: "Defaults to the focused pane." }
-      label:   { type: string, required: true, desc: "New label." }
+      pane_id: { type: string, required: true }
+      label:   { type: string }
   pane.close:
     group: panes
-    description: Close a pane (defaults to the focused pane).
+    danger: true
+    description: Close a pane.
     params:
-      pane_id: { type: string }
+      pane_id: { type: string, required: true }
   pane.send_text:
     group: io
-    description: Type literal text into a pane (no Enter is appended).
+    description: Type literal text into a pane. Does NOT press Enter.
     params:
-      pane_id: { type: string, desc: "Defaults to the focused pane." }
+      pane_id: { type: string, required: true }
       text:    { type: string, required: true }
   pane.send_keys:
     group: io
-    description: Send key chord(s) to a pane, e.g. "Enter" or "C-c".
+    description: 'Send key chords to a pane, e.g. submit a composer with ["Enter"], or interrupt with ["C-c"].'
     params:
-      pane_id: { type: string }
-      keys:    { type: string, required: true }
+      pane_id: { type: string, required: true }
+      keys:    { type: array, required: true, desc: 'Array of key-chord strings, e.g. ["Enter"], ["C-c"], ["C-x","C-s"].' }
   pane.send_input:
     group: io
-    description: Type a line of input into a pane and submit it (text + Enter).
+    description: 'Send text and/or keys to a pane in one call. To type a line and submit it, pass text plus keys ["Enter"].'
     params:
-      pane_id: { type: string }
-      input:   { type: string, required: true }
+      pane_id: { type: string, required: true }
+      text:    { type: string, desc: "Text to type (optional)." }
+      keys:    { type: array,  desc: 'Key chords to send after the text, e.g. ["Enter"] to submit.' }
   pane.wait_for_output:
     group: io
-    description: Block until `pattern` appears in a pane's output, or `timeout_ms` elapses.
+    description: Block until output matches, or timeout_ms elapses.
+    passthrough: true
     params:
-      pane_id:    { type: string }
-      pattern:    { type: string, required: true }
-      timeout_ms: { type: integer, desc: "Bounds how long the tool waits." }
+      pane_id:    { type: string, required: true }
+      source:     { type: string, required: true, enum: [visible, recent, recent_unwrapped, detection] }
+      match:      { type: object, required: true, desc: 'Match spec: {"type":"substring","value":"…"} or {"type":"regex","value":"…"}' }
+      lines:      { type: integer }
+      timeout_ms: { type: integer }
   pane.report_agent:
     group: authority
     description: "Advanced: report an agent's state into a pane."
+    passthrough: true
     params:
-      pane_id:       { type: string, required: true }
-      source:        { type: string, required: true }
-      agent:         { type: string, required: true }
-      state:         { type: string, required: true, enum: [idle, working, blocked, done, unknown] }
-      message:       { type: string }
-      custom_status: { type: string }
+      pane_id: { type: string, required: true }
+      source:  { type: string, required: true }
+      agent:   { type: string, required: true }
+      state:   { type: string, required: true, enum: [idle, working, blocked, unknown] }
   pane.report_agent_session:
     group: authority
     description: "Advanced: report an agent session id for a pane."
+    passthrough: true
     params:
-      pane_id:          { type: string, required: true }
-      source:           { type: string, required: true }
-      agent:            { type: string, required: true }
-      agent_session_id: { type: string, required: true }
+      pane_id: { type: string, required: true }
+      source:  { type: string, required: true }
+      agent:   { type: string, required: true }
   pane.report_metadata:
     group: authority
     description: "Advanced: report pane metadata (title, status, labels)."
@@ -273,63 +376,20 @@ methods:
     params:
       pane_id: { type: string, required: true }
       source:  { type: string, required: true }
-      title:   { type: string }
   pane.clear_agent_authority:
     group: authority
     description: "Advanced: clear a pane's agent authority."
+    passthrough: true
     params:
       pane_id: { type: string, required: true }
   pane.release_agent:
     group: authority
     description: "Advanced: release the agent owning a pane."
+    passthrough: true
     params:
       pane_id: { type: string, required: true }
-
-  # ── agent ───────────────────────────────────────────────────────────────
-  agent.list:
-    group: observe
-    description: List agents, optionally scoped to a workspace.
-    params:
-      workspace_id: { type: string }
-  agent.get:
-    group: observe
-    description: Get an agent's details by target.
-    params:
-      target: { type: string, required: true, desc: "terminal_id, pane_id, or unambiguous agent name." }
-  agent.read:
-    group: observe
-    description: Read an agent's output by target.
-    params:
-      target: { type: string, required: true }
-      source: { type: string, required: true, desc: "e.g. recent, visible." }
-      lines:  { type: integer }
-  agent.explain:
-    group: observe
-    description: Explain an agent's current state.
-    params:
-      target: { type: string, required: true }
-  agent.start:
-    group: agents
-    description: Start an agent by target.
-    params:
-      target: { type: string, required: true, desc: "The agent to launch (e.g. claude, codex) / target." }
-  agent.send:
-    group: agents
-    description: Send a message to an agent.
-    params:
-      target:  { type: string, required: true }
-      message: { type: string, required: true }
-  agent.rename:
-    group: agents
-    description: Rename an agent.
-    params:
-      target: { type: string, required: true }
-      label:  { type: string, required: true, desc: "New label." }
-  agent.focus:
-    group: agents
-    description: Focus an agent by target.
-    params:
-      target: { type: string, required: true }
+      source:  { type: string, required: true }
+      agent:   { type: string, required: true }
 
   # ── layout ──────────────────────────────────────────────────────────────
   layout.export:
@@ -338,86 +398,101 @@ methods:
     passthrough: true
   layout.apply:
     group: panes
-    description: Apply a layout.
+    description: Apply a layout tree.
     passthrough: true
+    params:
+      root: { type: object, required: true, desc: 'Layout tree (LayoutNode): tagged by "type": "pane" | "split".' }
 
   # ── events ──────────────────────────────────────────────────────────────
   events.subscribe:
     group: events
     description: Subscribe to events (returns the subscription ack).
+    passthrough: true
     params:
-      subscriptions: { type: array, required: true, desc: "List of {type, pane_id?, agent_status?}." }
+      subscriptions: { type: array, required: true, desc: 'Array of {"type":"pane.agent_status_changed","pane_id":…} or {"type":"pane.output_matched",…}.' }
   events.wait:
     group: events
-    description: Block until any subscribed event fires, then return it.
+    description: Block until a matching event fires, then return it.
+    passthrough: true
     params:
-      subscriptions: { type: array, required: true, desc: "List of {type, pane_id?, agent_status?}." }
-      timeout_ms:    { type: integer, desc: "Bounds how long the tool waits before giving up." }
+      match_event: { type: object, required: true, desc: 'Event match tagged by "event", e.g. {"event":"pane_agent_status_changed","pane_id":"…","agent_status":"done"}.' }
+      timeout_ms:  { type: integer }
 
   # ── integration ─────────────────────────────────────────────────────────
   integration.install:
     group: admin
-    description: Install a herdr integration.
+    description: Install a herdr agent integration.
     params:
-      name: { type: string, required: true }
+      target: { type: string, required: true, enum: [pi, omp, claude, codex, copilot, devin, droid, kimi, opencode, kilo, hermes, qodercli, cursor] }
   integration.uninstall:
     group: admin
-    description: Uninstall a herdr integration.
+    description: Uninstall a herdr agent integration.
     params:
-      name: { type: string, required: true }
+      target: { type: string, required: true, enum: [pi, omp, claude, codex, copilot, devin, droid, kimi, opencode, kilo, hermes, qodercli, cursor] }
 
   # ── plugin ──────────────────────────────────────────────────────────────
   plugin.list:
     group: observe
-    description: List plugins.
+    description: List linked plugins.
     passthrough: true
-  plugin.link:
-    group: admin
-    description: Link a plugin.
-    passthrough: true
-  plugin.unlink:
-    group: admin
-    description: Unlink a plugin.
-    passthrough: true
-  plugin.enable:
-    group: admin
-    description: Enable a plugin.
-    passthrough: true
-  plugin.disable:
-    group: admin
-    description: Disable a plugin.
-    passthrough: true
+    params:
+      plugin_id: { type: string }
   plugin.action.list:
     group: observe
     description: List plugin actions.
     passthrough: true
+    params:
+      plugin_id: { type: string }
+  plugin.log.list:
+    group: observe
+    description: List plugin command logs.
+    passthrough: true
+    params:
+      plugin_id: { type: string }
+      limit:     { type: integer }
+  plugin.link:
+    group: admin
+    description: Link a plugin from a path.
+    passthrough: true
+    params:
+      path:    { type: string, required: true }
+      enabled: { type: boolean }
+  plugin.unlink:
+    group: admin
+    description: Unlink a plugin.
+    params:
+      plugin_id: { type: string, required: true }
+  plugin.enable:
+    group: admin
+    description: Enable a plugin.
+    params:
+      plugin_id: { type: string, required: true }
+  plugin.disable:
+    group: admin
+    description: Disable a plugin.
+    params:
+      plugin_id: { type: string, required: true }
   plugin.action.invoke:
     group: admin
     description: Invoke a plugin action.
     passthrough: true
-  plugin.log.list:
-    group: observe
-    description: List plugin logs.
-    passthrough: true
+    params:
+      action_id: { type: string, required: true }
+      plugin_id: { type: string }
   plugin.pane.open:
     group: admin
     description: Open a plugin pane.
     passthrough: true
+    params:
+      plugin_id:  { type: string, required: true }
+      entrypoint: { type: string, required: true }
   plugin.pane.focus:
     group: admin
     description: Focus a plugin pane.
-    passthrough: true
+    params:
+      pane_id: { type: string, required: true }
   plugin.pane.close:
     group: admin
     description: Close a plugin pane.
-    passthrough: true
-
-  # ── client ──────────────────────────────────────────────────────────────
-  client.window_title.set:
-    group: admin
-    description: Set the terminal window title.
-    passthrough: true
-  client.window_title.clear:
-    group: admin
-    description: Clear the terminal window title.
-    passthrough: true
+    params:
+      pane_id: { type: string, required: true }

@@ -251,11 +251,14 @@ mod tests {
     #[test]
     fn typed_method_schema_is_strict_with_required() {
         let specs = load();
-        let split = specs.iter().find(|s| s.method == "pane.split").unwrap();
-        let schema = input_schema(split);
+        // a fully-enumerated method stays strict (additionalProperties:false)
+        let send = specs.iter().find(|s| s.method == "agent.send").unwrap();
+        let schema = input_schema(send);
         assert_eq!(schema["additionalProperties"], json!(false));
-        assert_eq!(schema["required"], json!(["direction"]));
-        assert_eq!(schema["properties"]["direction"]["enum"], json!(["right", "down", "left", "up"]));
+        assert_eq!(schema["required"], json!(["target", "text"]));
+        // enums are encoded straight from the source structs (SplitDirection = right|down)
+        let split = specs.iter().find(|s| s.method == "pane.split").unwrap();
+        assert_eq!(input_schema(split)["properties"]["direction"]["enum"], json!(["right", "down"]));
     }
 
     #[test]
@@ -268,15 +271,22 @@ mod tests {
     #[test]
     fn validate_enforces_required_unknown_and_enum() {
         let specs = load();
-        let split = specs.iter().find(|s| s.method == "pane.split").unwrap();
         let arg = |pairs: &[(&str, Value)]| pairs.iter().cloned().map(|(k, v)| (k.to_string(), v)).collect::<Map<String, Value>>();
+        let find = |m: &str| specs.iter().find(|s| s.method == m).unwrap();
 
+        // required + enum (pane.split: direction required, enum right|down)
+        let split = find("pane.split");
         assert!(validate(split, &Map::new()).is_err(), "missing required direction");
-        assert!(validate(split, &arg(&[("direction", json!("right")), ("typo", json!(1))])).is_err(), "unknown field");
         assert!(validate(split, &arg(&[("direction", json!("sideways"))])).is_err(), "bad enum");
-        assert!(validate(split, &arg(&[("direction", json!("right"))])).is_ok(), "valid");
+        assert!(validate(split, &arg(&[("direction", json!("right"))])).is_ok(), "valid split");
 
-        let plugin = specs.iter().find(|s| s.method == "plugin.list").unwrap();
+        // unknown-field rejection on a strict (fully-enumerated) method
+        let send = find("agent.send");
+        assert!(validate(send, &arg(&[("target", json!("x")), ("text", json!("y")), ("typo", json!(1))])).is_err(), "unknown field");
+        assert!(validate(send, &arg(&[("target", json!("x")), ("text", json!("y"))])).is_ok(), "valid send");
+
+        // passthrough allows extras
+        let plugin = find("plugin.list");
         assert!(validate(plugin, &arg(&[("whatever", json!(true))])).is_ok(), "passthrough allows extras");
     }
 
@@ -285,14 +295,19 @@ mod tests {
         let specs = load();
         let arg = |pairs: &[(&str, Value)]| pairs.iter().cloned().map(|(k, v)| (k.to_string(), v)).collect::<Map<String, Value>>();
 
-        // events.wait accepts a per-call timeout_ms (not rejected as an unknown field).
+        // events.wait requires match_event (not subscriptions), plus optional timeout_ms.
         let ew = specs.iter().find(|s| s.method == "events.wait").unwrap();
-        assert!(validate(ew, &arg(&[("subscriptions", json!([])), ("timeout_ms", json!(5000))])).is_ok());
+        assert!(validate(ew, &Map::new()).is_err(), "missing match_event");
+        assert!(validate(ew, &arg(&[("match_event", json!({"event": "pane_agent_status_changed"})), ("timeout_ms", json!(5000))])).is_ok());
 
-        // pane.wait_for_output requires `pattern`.
+        // pane.wait_for_output requires pane_id + source + match (a structured object).
         let wfo = specs.iter().find(|s| s.method == "pane.wait_for_output").unwrap();
-        assert!(validate(wfo, &Map::new()).is_err(), "missing pattern");
-        assert!(validate(wfo, &arg(&[("pattern", json!("done"))])).is_ok());
+        assert!(validate(wfo, &Map::new()).is_err(), "missing required");
+        assert!(validate(wfo, &arg(&[
+            ("pane_id", json!("w1:p1")),
+            ("source", json!("recent")),
+            ("match", json!({"type": "substring", "value": "done"})),
+        ])).is_ok());
     }
 
     /// Drift check: the manifest's methods must exactly match what the live daemon

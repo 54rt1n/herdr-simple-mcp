@@ -55,9 +55,9 @@ Scope ids are **optional** — omit them to act on the focused context or list s
   parallel (one agent per worktree).
 
 ### Run agents
-- `start_agent {target}` — launch an agent; `target` names which (e.g. `claude`, `codex`).
-  herdr places it in a pane. Re-read `agent_list` afterward to get its id.
-- `agent_send {target, message}` — give an agent an instruction.
+- `start_agent {name}` — launch an agent; `name` is which (e.g. `claude`, `codex`). herdr
+  places it in a pane. Re-read `agent_list` afterward to get its id.
+- `agent_send {target, text}` — give an agent an instruction.
 - `agent_read {target, source, lines?}` — read its output. `agent_get` / `agent_explain`
   for status and a plain-language account of what it's doing.
 
@@ -99,7 +99,7 @@ Scope ids are **optional** — omit them to act on the focused context or list s
 ## A typical flow
 
 1. `workspace_list` / `agent_list` — see what already exists.
-2. `create_workspace` (or reuse one) → `start_agent {target: "claude"}` per task; for parallel
+2. `create_workspace` (or reuse one) → `start_agent {name: "claude"}` per task; for parallel
    branch work, `worktree_create` then `start_agent` in each.
 3. `agent_send` each agent its task.
 4. `events_wait` for agents to reach `done` (or `blocked`).
